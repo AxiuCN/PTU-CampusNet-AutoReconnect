@@ -12,6 +12,17 @@
 - **校验**：JSONP GET `http://192.168.116.8:801/eportal/?c=Portal&a=check_captcha` 验证
 - **登录**：JSONP GET `http://192.168.116.8/drcom/login` 提交账号密码
 
+## 获取安装
+
+在安装目录执行：
+> Github
+```bash
+git clone --depth=1 https://github.com/AxiuCN/PTU-CampusNet-AutoReconnect.git
+```
+
+或下载压缩包：
+[GitHub Releases](https://github.com/AxiuCN/PTU-CampusNet-AutoReconnect/releases) 下载最新版 ZIP，解压即可
+
 ## 快速开始
 
 ### 1. 安装 Python
