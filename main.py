@@ -83,6 +83,7 @@ class Monitor:
     def _loop(self):
         consecutive = 0
         first = True
+        base_interval = self.config.check_interval
 
         while self._running:
             try:
@@ -91,14 +92,15 @@ class Monitor:
                         self._notify("已连接")
                     consecutive = 0
                     first = False
-                    time.sleep(self.config.check_interval)
+                    time.sleep(base_interval)
                     continue
 
                 # 断网
                 consecutive += 1
-                logger.warning(f"检测到断网 (连续 {consecutive} 次)")
-                if consecutive == 1:
+                if consecutive <= 1:
                     self._notify("断网，正在重连...")
+                elif consecutive % 10 == 0:
+                    logger.warning("已连续断网 %d 次", consecutive)
 
                 # 执行登录
                 if do_login(self.config):
@@ -109,14 +111,19 @@ class Monitor:
                         consecutive = 0
                     else:
                         logger.warning("登录返回成功但网络仍不通")
-                else:
-                    if consecutive == 1:
-                        self._notify("重连失败，将继续尝试...")
+                elif consecutive == 1:
+                    self._notify("重连失败，将继续尝试...")
 
             except Exception as e:
-                logger.error(f"监控异常: {e}", exc_info=True)
+                logger.error("监控异常: %s", e, exc_info=True)
 
-            time.sleep(self.config.check_interval)
+            # 退避：连续失败超过阈值后延长等待
+            delay = base_interval
+            if consecutive > 10:
+                delay = base_interval * 10  # 5 分钟
+            elif consecutive > 5:
+                delay = base_interval * 4   # 2 分钟
+            time.sleep(delay)
 
 
 def run_service():

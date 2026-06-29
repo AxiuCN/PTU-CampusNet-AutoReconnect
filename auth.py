@@ -28,23 +28,20 @@ logger = logging.getLogger(__name__)
 
 
 def _cb() -> str:
-    """生成 JSONP callback 名称, 匹配浏览器格式 dr{timestamp}"""
     return f"dr{int(_time.time() * 1000)}"
 
 
 def _parse_jsonp(text: str):
-    """解析 JSONP 响应: callback({...}) 或 ({"result":"1"}) 或纯 JSON"""
+    """解析 JSONP 响应"""
     if not text or not text.strip():
         return None
     text = text.strip()
-    # 纯 JSON
     if text.startswith("{"):
         try:
             return _json.loads(text)
         except _json.JSONDecodeError:
             pass
-    # JSONP: callback({...}) 或 ({...})
-    m = _re.search(r'\{.*\}', text, _re.DOTALL)
+    m = _re.search(r"\{.*\}", text, _re.DOTALL)
     if m:
         try:
             return _json.loads(m.group())
@@ -55,9 +52,7 @@ def _parse_jsonp(text: str):
 
 def do_login(config: Config) -> bool:
     """
-    完整登录流程, 验证码错误时自动重试 (最多 3 次)。
-
-    返回 True = 登录成功, False = 失败。
+    完整登录流程，自动重试。服务器异常时退避。
     """
     base = f"http://{config.portal_host}"
     base_api = f"{base}:{config.portal_port}"
@@ -65,7 +60,7 @@ def do_login(config: Config) -> bool:
 
     for attempt in range(1, 4):
         if attempt > 1:
-            logger.info(f"第 {attempt} 次重试...")
+            logger.info("第 %d 次重试...", attempt)
 
         client = httpx.Client(timeout=config.connect_timeout + 10)
         client.headers.update({
@@ -76,7 +71,6 @@ def do_login(config: Config) -> bool:
 
         try:
             # ---- 1. 获取验证码 ----
-            # URL 格式: v=3.0_ 后接时间戳防缓存
             captcha_url = (
                 f"{base_api}/eportal/"
                 f"?c=main&a=getCode&v=3.0_{int(_time.time() * 1000)}"
@@ -87,25 +81,23 @@ def do_login(config: Config) -> bool:
 
             # ---- 2. OCR 识别 ----
             captcha_text = ocr.classification(captcha_bytes)
-            logger.info(f"验证码识别: {captcha_text}")
+            logger.info("验证码识别: %s", captcha_text)
 
             if len(captcha_text) < 3:
-                logger.warning(f"验证码识别结果可疑: {captcha_text}")
+                logger.warning("验证码识别结果可疑: %s", captcha_text)
 
-            # ---- 3. JSONP 验证码校验 ----
+            # ---- 3. 验证码校验 ----
             resp = client.get(
                 f"{base_api}/eportal/",
                 params={
-                    "c": "Portal",
-                    "a": "check_captcha",
-                    "callback": _cb(),
-                    "captcha": captcha_text,
+                    "c": "Portal", "a": "check_captcha",
+                    "callback": _cb(), "captcha": captcha_text,
                     "_": int(_time.time() * 1000),
                 },
                 timeout=config.connect_timeout,
             )
             captcha_result = _parse_jsonp(resp.text)
-            logger.debug(f"验证码校验: {resp.text[:150]}")
+            logger.debug("验证码校验: %s", resp.text[:150])
 
             if not captcha_result or str(captcha_result.get("result")) != "1":
                 logger.warning("验证码校验失败, 重试...")
@@ -113,7 +105,7 @@ def do_login(config: Config) -> bool:
 
             logger.info("验证码校验通过")
 
-            # ---- 4. JSONP 登录 ----
+            # ---- 4. 登录 ----
             suffix = config.get_carrier_suffix()
             username = config.username + suffix
 
@@ -121,21 +113,17 @@ def do_login(config: Config) -> bool:
                 f"{base}/drcom/login",
                 params={
                     "callback": _cb(),
-                    "DDDDD": username,
-                    "upass": config.password,
+                    "DDDDD": username, "upass": config.password,
                     "0MKKey": "123456",
-                    "R1": "0",
-                    "R3": "0",
-                    "R6": "0",
-                    "para": "00",
-                    "v6ip": "",
+                    "R1": "0", "R3": "0", "R6": "0",
+                    "para": "00", "v6ip": "",
                     "_": int(_time.time() * 1000),
                 },
                 timeout=config.connect_timeout,
             )
 
-            logger.info(f"登录: 账号={username}")
-            logger.debug(f"登录响应: {resp.text[:300]}")
+            logger.info("登录: 账号=%s", username)
+            logger.debug("登录响应: %s", resp.text[:300])
 
             # ---- 5. 解析结果 ----
             result = _parse_jsonp(resp.text)
@@ -144,20 +132,20 @@ def do_login(config: Config) -> bool:
                 if str(result.get("result")) == "1":
                     logger.info("登录成功")
                     return True
-                else:
-                    msg = result.get("msga", result.get("msg", ""))
-                    logger.warning(f"登录失败: result={result.get('result')}, "
-                                   f"msg={msg}")
-                    if "waitsec" in str(msg):
-                        logger.info("速率限制, 等待后重试...")
-                        _time.sleep(3)
+                msg = result.get("msga", result.get("msg", ""))
+                logger.warning("登录失败: result=%s, msg=%s",
+                               result.get("result"), msg)
+                if "waitsec" in str(msg):
+                    _time.sleep(3)
             else:
-                logger.warning(f"无法解析登录响应: {resp.text[:200]}")
+                logger.warning("无法解析登录响应: %s", resp.text[:200])
 
-        except httpx.RequestError as e:
-            logger.error(f"登录请求失败: {e}")
-        except Exception as e:
-            logger.error(f"登录异常: {e}", exc_info=True)
+        except httpx.HTTPStatusError as e:
+            logger.warning("服务器返回 %d (暂不可用)", e.response.status_code)
+        except httpx.RequestError:
+            logger.warning("登录请求失败 (连接被拒或超时)")
+        except Exception:
+            logger.error("登录异常", exc_info=True)
         finally:
             client.close()
 
