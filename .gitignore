@@ -8,6 +8,10 @@ logs/
 .claude/
 CLAUDE.md
 
+# DeepSeek Harness 工作区
+.dsh/
+AGENTS.md
+
 # Python
 __pycache__/
 *.py[cod]
